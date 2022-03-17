@@ -1,0 +1,67 @@
+---
+title: "Mapping Ethnic Groups in Iraq and Syria - Work in Progress"
+author: "Daniel K Baissa"
+date: "3/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The libraries I will use are:
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+```
+
+
+I will start by merging the Iraq and Syria shapefiles. I will start by binding the Iraq and Syria shapefiles.
+
+```{r echo=T, message=FALSE, warning=FALSE, results="hide"}
+
+Iraq <-st_read("Shapefiles/Iraq/pc284dt8747.shp")
+Syria <-st_read("Shapefiles/Syria/gk468fm4741.shp")
+
+Iraq_and_Syria <- st_union(Iraq, Syria)
+
+ggplot(data = Iraq_and_Syria) +
+    geom_sf()
+```
+
+
+Now I will load in the Ethnic group data from the the GeoEPR dataset.
+
+
+```{r echo = T, results = 'hide'}
+world_ethnic_groups <-st_read("Shapefiles/GeoEPR-2021/GeoEPR-2021.shp")
+
+world_ethnic_groups <- st_transform(world_ethnic_groups, crs = 4326)
+
+ggplot(data = world_ethnic_groups) +
+    geom_sf()
+```
+
+This map contains every ethnic group on Earth. I will next select down the data to include only Iraq and Syria
+
+```{r}
+
+
+ggplot(data = Iraq_and_Syria) +
+    geom_sf(fill = "red", alpha = 0.5)+
+    geom_sf(data= world_ethnic_groups, alpha = 0.1)+
+    coord_sf(xlim = c(35, 49), ylim = c(29, 37), expand = TRUE)
+
+```
+
+
+```{r}
+Iraq_Syria_groups <- world_ethnic_groups %>%
+  filter(statename == "Syria" | statename == "Iraq")
+
+ggplot(data = Iraq_and_Syria) +
+    geom_sf()+
+    geom_sf(data= Iraq_Syria_groups, aes(fill = group) , alpha = .8)
+```
+

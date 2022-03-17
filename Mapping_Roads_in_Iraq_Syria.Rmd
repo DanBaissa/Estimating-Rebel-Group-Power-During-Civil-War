@@ -1,0 +1,58 @@
+---
+title: "Mapping Roads in Iraq and Syria"
+author: "Daniel K Baissa"
+date: "3/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intro
+
+For my dissertation I will use road data in Iraq and Syria. In this document, I will extract and merge all of the requisit shapefiles.
+
+The libraries I will use are:
+
+```{r}
+library(rgdal)
+library(raster)
+```
+
+
+I will start by merging the Iraq and Syria shapefiles. I will start by binding the Iraq and Syria shapefiles.
+
+```{r}
+Iraq <- readOGR("Shapefiles/Iraq", "pc284dt8747")
+Syria <- readOGR("Shapefiles/Syria", "gk468fm4741")
+Iraq_and_Syria <- bind(Iraq, Syria)
+plot(Iraq_and_Syria)
+```
+
+Now that the shapefiles have been bound, I can aggregate them.
+
+```{r}
+Iraq_Syria_joined <- aggregate(Iraq_and_Syria)
+plot(Iraq_Syria_joined)
+```
+
+Now that we have the Iraq and Syria area mapped out, I will start adding the roads.
+
+I will read in the in the shapefiles.
+
+```{r}
+Iraq_roads <- readOGR("Shapefiles/Iraq/primary_routes", "primary_routes")
+Syria_roads <- readOGR("Shapefiles/Syria/roads", "hotosm_syr_roads_polygons")
+```
+
+Now I will bind the shapefiles
+
+```{r}
+# Iraq_and_Syria_roads <- bind(Iraq_roads, Syria_roads)
+
+plot(Iraq_roads)
+plot(Syria_roads)
+
+```
+

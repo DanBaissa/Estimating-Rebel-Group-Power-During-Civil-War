@@ -1,0 +1,114 @@
+---
+title: "Creating a Cost-Distance Calculation"
+author: "Daniel K Baissa"
+date: "3/7/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(rgdal)
+library(raster)
+```
+
+
+Loading in the rasters
+
+```{r}
+roads <- raster("rasters/road_rasters/iraq_and_syria_road.tif")
+cost_r <- raster("rasters/cropped_masked/cost_without_roads.tif")
+```
+
+```{r}
+
+# cropped <- crop(roads, cost_r)
+cropped <- crop(cost_r, roads)
+cropped <- resample(cropped, roads)
+plot(cropped)
+plot(roads)
+
+```
+
+Roads are a more efficient way of moving and therefore have a lower cost. I will multiply the roads by 0.05 and then multiply that roads raster to the cost raster.
+
+```{r}
+cost_of_roads <- 0.05
+
+roads[roads == 1] <- cost_of_roads
+
+roads[roads == 0] <- 1
+
+plot(roads)
+
+```
+
+
+```{r}
+
+cost_raster <- cropped*roads
+
+plot(cost_raster)
+```
+
+Now let's add the capital of ISIS
+
+```{r}
+x_coords <- c(43.7813, 38.9981)
+y_coords <- c(33.3444, 35.9594)
+
+
+Raqqa_and_Fallujah <- SpatialPoints(coords = cbind(x_coords,y_coords))
+```
+
+
+```{r}
+library(gdistance)
+
+r <- raster(nrows=6, ncols=7, 
+            xmn=0, xmx=7, 
+            ymn=0, ymx=6, 
+            crs="+proj=utm +units=m")
+
+r[] <- c(2, 2, 1, 1, 5, 5, 5,
+         2, 2, 8, 8, 5, 2, 1,
+         7, 1, 1, 8, 2, 2, 2,
+         8, 7, 8, 8, 8, 8, 5,
+         8, 8, 1, 1, 5, 3, 9,
+         8, 1, 1, 2, 5, 3, 9)
+
+# 1/mean: reciprocal to get permeability
+tr <- transition(r, function(x) 1/mean(x), 16) 
+tr <- geoCorrection(tr)
+
+c1 <- c(5.5,1.5) 
+c2 <- c(1.5,5.5)
+
+A <- accCost(tr, c1)
+# plot(A)
+
+plot(r, col=colorRampPalette(c("green", "yellow", "red", "purple"))(255))
+text(r)
+
+plot(A, col=colorRampPalette(c("white", "green", "yellow", "red", "purple"))(255))
+text(A)
+
+
+```
+
+
+```{r}
+
+tr <- transition(cost_raster, function(x) 1/mean(x), 16) 
+tr <- geoCorrection(tr)
+
+a <- accCost(tr, Raqqa_and_Fallujah)
+
+plot(a, col=colorRampPalette(c("white", "green", "yellow", "orange", "red", "purple"))(255))
+# text(A)
+plot(log(a), col=colorRampPalette(c("white", "green", "yellow", "orange", "red", "purple"))(255))
+```
+

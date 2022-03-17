@@ -1,0 +1,243 @@
+---
+title: "Merging Iraq and Syria Shapefiles"
+author: "Daniel K Baissa"
+date: "3/3/2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intro
+
+In this document I will merge the Iraq and Syria shapefiles into one joined shapefile.
+
+I will use the following libraries to join the shapefiles:
+
+```{r}
+library(rgdal)
+library(raster)
+```
+
+Let's load in the Iraq Shapefile first. I will use readOGR and then plot the shapefile to make sure it is working.
+
+```{r}
+Iraq <- readOGR("Shapefiles/Iraq", "pc284dt8747")
+plot(Iraq)
+```
+
+It is working. Now let's load in Syria.
+
+```{r}
+Syria <- readOGR("Shapefiles/Syria", "gk468fm4741")
+plot(Syria)
+```
+
+The Syria shapefile also loaded correctly.
+
+### Merging
+
+Now that we have our shapefiles, we can merge them using the bind() function.
+
+```{r}
+Iraq_and_Syria <- bind(Iraq, Syria)
+
+plot(Iraq_and_Syria)
+```
+
+Now let's save the merged shapefile.
+
+```{r}
+# writeOGR(Iraq_and_Syria, "Shapefiles/Iraq_Syria_merged", "Iraq_and_Syria", driver = "ESRI Shapefile")
+```
+
+### Disolving the Polygons
+
+Now that we have the joined Iraq and Syria shapefile, I want a shapefile that disolves away the borded between the two countries. To do this I will use the aggregate() function.
+
+```{r}
+Iraq_Syria_joined <- aggregate(Iraq_and_Syria)
+
+plot(Iraq_Syria_joined)
+```
+
+Great! Now we have a polygon with Iraq and Syria joined and the border between the two dissolved.
+
+## Merging in the Raster data
+
+Now that we have the shapefile we can use it to cut out all of the data we need from the global raster. 
+
+
+I will start by gathering all of the rasters I will for Iraq and Syria. 
+
+```{r}
+ff <- list.files("Rasters/base_data", pattern = "\\.tif$", full=TRUE)
+```
+
+Since the rasters have different extents, I will need to crop them all individually and then save them to be stacked. 
+
+I will start by making a function that will crop and them mask the rasters. The reason I want to do both is because cropping limit's the extent of the raster, and masking sets all of the values outside of the shapefile to NA. Masking alone would result in a much wider extent and cropping would result in areas outside of the countries I am looking at.
+
+```{r}
+
+masked_crop <- function(r, shp){
+  ras <- raster(r)
+  cropped <- crop(ras, shp)
+  masked <- mask(cropped, shp)
+  
+  return(masked)
+}
+```
+
+Now let's try the function on the first raster
+
+
+```{r}
+
+bio12 <- masked_crop(ff[1], Iraq_Syria_joined)
+
+plot(bio12)
+```
+
+It is working!! Now let's do it for all of the rasters
+
+
+
+```{r}
+bio6 <- masked_crop(ff[2], Iraq_Syria_joined)
+land_use <- masked_crop(ff[3], Iraq_Syria_joined)
+Elev <- masked_crop(ff[4], Iraq_Syria_joined)
+```
+
+```{r}
+plot(bio6)
+plot(land_use)
+plot(Elev)
+```
+
+### Working with the rasters
+
+Now that we have cropped and masked the data, let's start working with them. 
+
+#### Ruggedness Index
+
+I will start by creating a ruggedness index for Iraq and Syria.
+
+https://www.rdocumentation.org/packages/spatialEco/versions/1.3-7/topics/tri
+
+```{r}
+library(spatialEco)
+Ruggedness <- tri(Elev, exact = FALSE)
+```
+
+```{r}
+plot(Ruggedness)
+```
+
+
+### Reclassifying the Rasters
+
+#### GlobCover land Cover Maps (GlobCover)
+
+GlobCover is an European Space Agency initiative which aimed  to develop a service capable of delivering global composites and land cover maps using as input observations from the 300m MERIS sensor on board the ENVISAT satellite mission.  The Globcover global Land Cover map covers the period December 2004 - June 2006 and was derived by an automatic and regionally-tuned classification of a MERIS full resolution surface reflectance time series.  The Land Cover map contains the following 22 numerical classes corresponding to specific land cover types:
+
+(11) Post-flooding or irrigated croplands (or aquatic); (14) Rainfed croplands; (20) Mosaic cropland (50-70%) / vegetation (grassland/shrubland/forest) (20-50%); (30) Mosaic vegetation (grassland/ shrubland/ forest) (50-70%) / cropland (20-50%); (40) Closed to open (>15%) broadleaved evergreen or semi-deciduous forest (>5m); (50) Closed (>40%) broadleaved deciduous forest (>5m); (60) Open (15-40%) broadleaved deciduous forest/woodland (>5m); (70) Closed (>40%) needleleaved evergreen forest (>5m); (90) Open (15-40%) needleleaved deciduous or evergreen forest (>5m); (100) Closed to open (>15%) mixed broadleaved and needleleaved forest (>5m); (110) Mosaic forest or shrubland (50-70%) / grassland (20-50%); (120) Mosaic grassland (50-70%) / forest or shrubland (20-50%); (130) Closed to open (>15%) (broadleaved or needleleaved, evergreen or deciduous) shrubland (<5m); (140) Closed to open (>15%) herbaceous vegetation (grassland, savannas or lichens/mosses); (150) Sparse (<15%) vegetation; (160) Closed to open (>15%) broadleaved forest regularly flooded (semi-permanently or temporarily) - Fresh or brackish water; (170) Closed (>40%) broadleaved forest or shrubland permanently flooded - Saline or brackish water; (180) Closed to open (>15%) grassland or woody vegetation on regularly flooded or waterlogged soil - Fresh, brackish or saline water; (190) Artificial surfaces and associated areas (Urban areas >50%); (200) Bare areas; (210) Water bodies; (220) Permanent snow and ice.
+
+As the legend indicates, the individual Globcover land cover classes may encompass quite different vegetation physiognomies. To facilitate international correlation they have been linked to  the corresponding entries of the FAO Land Cover Classification System (LCCS).  The Globcover dataset is available from the relevant ESA website in GeoTIFF Format in the World Geodetic System 1984 (WGS 84) coordinate system at 10 arc-seconds (~300 m) spatial resolution.
+
+Urban areas can be tricky and I will need to figure out a better solution.
+
+```{r}
+
+classes <- c(10, 30, 2,  39, 110, 3,  119, 160, 2, 169, 180, 4, 189, 210, 2, 210,220, 4, 221, 230, .5)
+
+r_land_cover <- raster::reclassify(land_use, classes)
+plot(r_land_cover)
+```
+
+#### Terrain Ruggedness Index
+Description
+
+Implementation of the Riley et al (1999) Terrain Ruggedness Index
+
+The algebraic approximation is considerably faster. However, because inclusion of the center cell, the larger the scale the larger the divergence of the minimum value.
+
+Recommended ranges for classifying Topographic Ruggedness Index:
+
+    0-80 - level terrain surface.
+
+    81-116 - nearly level surface.
+
+    117-161 - slightly rugged surface.
+
+    162-239 - intermediately rugged surface.
+
+    240-497 - moderately rugged surface.
+
+    498-958 - highly rugged surface.
+
+    gt 959 - extremely rugged surface.
+
+```{r}
+# classes <- c(0, 80, 1,  80, 116, 2,  116, 161, 3, 161, 239, 4, 239, 497, 5, 497,958, 6)
+
+# r_Ruggedness <- raster::reclassify(Ruggedness, classes)
+log_ruggedness <- log(Ruggedness+1)
+plot(log_ruggedness)
+```
+
+#### Log rainfall
+
+```{r}
+log_bio12 <- log(bio12)
+
+inverted_log_rainfall <- (log_bio12@data@max + log_bio12*-1)+1
+
+plot(inverted_log_rainfall)
+```
+
+#### Log Temperature
+
+To log the temperature, I will start by converting the temperature data into Kelvin and then logging it.
+
+The Bio 6 data I have is in Celsius but times 10.
+
+
+ Kelvin = Celsius + 273.15
+ 
+```{r}
+
+bio6 <- bio6/10
+
+Log_temp_K <- log(bio6 + 273.15)
+
+plot(Log_temp_K)
+```
+ 
+## Raster Math
+
+I will have to adjust the resultion of the data so that it all matches.
+
+```{r}
+log_ruggedness_resampled <- resample(log_ruggedness, inverted_log_rainfall)
+land_cover_resampled <- resample(r_land_cover, inverted_log_rainfall)
+
+```
+
+
+```{r}
+test <- Log_temp_K*inverted_log_rainfall*log_ruggedness_resampled*land_cover_resampled
+
+plot(test)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+writeRaster(test,'Rasters/cropped_masked/cost_without_roads.tif', options=c('TFW=YES'))
+```
+
+

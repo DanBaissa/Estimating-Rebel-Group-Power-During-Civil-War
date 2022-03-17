@@ -1,0 +1,251 @@
+---
+title: "Ethnicity , Cost-Distance, and how Civil Wars Spread"
+author: "Daniel K Baissa"
+date: "3/14/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rgdal)
+library(raster)
+library(tidyverse)
+library(sf)
+```
+
+## Intro
+
+## Managing the Shapefiles
+
+
+I will start by merging the Iraq and Syria shapefiles. I will start by binding the Iraq and Syria shapefiles.
+
+```{r echo=T, message=FALSE, warning=FALSE, results="hide"}
+
+Iraq <-st_read("Shapefiles/Iraq/pc284dt8747.shp")
+Syria <-st_read("Shapefiles/Syria/gk468fm4741.shp")
+
+Iraq_and_Syria <- st_union(Iraq, Syria)
+
+ggplot(data = Iraq_and_Syria) +
+    geom_sf()
+```
+
+```{r echo = T, results = 'hide'}
+world_ethnic_groups <-st_read("Shapefiles/GeoEPR-2021/GeoEPR-2021.shp")
+
+world_ethnic_groups <- st_transform(world_ethnic_groups, crs = 4326)
+
+ggplot(data = world_ethnic_groups) +
+    geom_sf()
+```
+
+```{r}
+Iraq_Syria_groups <- world_ethnic_groups %>%
+  filter(statename == "Syria" | statename == "Iraq")
+
+ggplot(data = Iraq_and_Syria) +
+    geom_sf()+
+    geom_sf(data= Iraq_Syria_groups, aes(fill = group) , alpha = .8)
+```
+
+```{r}
+# st_write(Iraq_Syria_groups, 'Shapefiles/Iraq_Syria_merged/Iraq_Syria_groups.shp')
+```
+
+### Rasterizing the Ethnic Data
+
+I theorize that ethnic groups have an effect on a groups ability to hide and maneuver. Groups that are hostile to the rebel group are less likely to hide or aid the insurgents, where as co-ethnics are more likely to hide them (cites).
+
+This means that I will convert the raster data into a cost surface which can be used with our geographic and climitalogical data.
+
+Now Let's create a function that will apply values depending on group relations.
+
+```{r}
+
+shp <- rgdal::readOGR("Shapefiles/Iraq_Syria_merged/Iraq_Syria_groups.shp")
+
+
+group_cost <- function(in_group = "Sunni Arabs", 
+                       out_group = c("Shi'a Arabs", 
+                                     "Kurds", 
+                                     "Assyrians",
+                                     "Turkmen",
+                                     "Christians",
+                                     "Alawi",
+                                     "Druze"),
+                       # neutral = NA,
+                       shapefile = shp,
+                       in_group_bonus = .5,
+                       out_group_cost = 5)
+  {
+  shp@data[["group_value"]] <- 1
+  shp@data[["group_value"]][which(shp@data[["group"]] %in% in_group)] <- in_group_bonus
+  shp@data[["group_value"]][which(shp@data[["group"]] %in% out_group)] <- out_group_cost
+  
+  # Rasterizing
+  template <- raster(ext = extent(shp), crs = projection(shp))
+
+  rst <- rasterize(shp, template, field = "group_value")
+  
+  return(rst)
+}
+```
+
+Now let's create some cost rasters using this function. I will start with the Sunni Arabs since ISIS was a Sunni group
+
+```{r}
+sunni <- group_cost(shapefile = shp, in_group_bonus = .25)
+
+plot(sunni)
+```
+
+Now I will plot the coalition against ISIS. For now I will simplify them into one cost group, but in the future they will be broken down by each appropreat group.
+
+```{r}
+coalition <- group_cost(out_group = "Sunni Arabs", 
+                       in_group = c("Shi'a Arabs", 
+                                     "Kurds", 
+                                     "Assyrians",
+                                     "Turkmen",
+                                     "Christians",
+                                     "Alawi",
+                                     "Druze"),
+                       shapefile = shp, 
+                       in_group_bonus = .75,
+                       out_group_cost = 2)
+
+plot(coalition)
+```
+
+## Managing the Raster data
+
+Loading in the rasters
+
+```{r}
+roads <- raster("rasters/road_rasters/iraq_and_syria_road.tif")
+cost_r <- raster("rasters/cropped_masked/cost_without_roads.tif")
+```
+
+```{r}
+
+# cropped <- crop(roads, cost_r)
+cropped <- crop(cost_r, roads)
+cropped <- resample(cropped, roads)
+plot(cropped)
+plot(roads)
+
+```
+
+
+
+Roads are a more efficient way of moving and therefore have a lower cost. I will multiply the roads by 0.05 and then multiply that roads raster to the cost raster.
+
+```{r}
+cost_of_roads <- 0.05
+
+roads[roads == 1] <- cost_of_roads
+
+roads[roads == 0] <- 1
+
+plot(roads)
+
+```
+
+
+```{r}
+
+cost_raster <- cropped*roads
+
+plot(cost_raster)
+```
+
+## Calculating ISIS's extent
+The first mover in my function is the government. They have resources deployed, ready to counter threats. In this example, I will say the coalition is the government. Again, this is just for now while I create all of these functions and ensure that they are working.
+
+
+
+The centers of power for the coalition. Baghdad, Erbil, and Damascus
+
+```{r}
+x_coords <- c(44.3661, 43.9930, 36.2765) 
+y_coords <- c(33.3152, 36.1901, 33.5138)
+
+
+Baghdad_Erbil_and_Damascus <- SpatialPoints(coords = cbind(x_coords,y_coords))
+```
+
+
+```{r}
+cropped_coalition <- crop(coalition, roads)
+cropped_coalition <- resample(cropped_coalition, roads)
+
+cost_raster <- (cropped*roads)*(cropped_coalition)
+
+plot(cost_raster)
+```
+
+```{r}
+tr <- transition(cost_raster, function(x) 1/mean(x), 16) 
+tr <- geoCorrection(tr)
+
+coalition_a <- accCost(tr, Baghdad_Erbil_and_Damascus)
+
+plot(coalition_a, col=colorRampPalette(c("black", "white", "green", "yellow", "orange", "red", "purple"))(255))
+plot(log(coalition_a), col=colorRampPalette(c("black", "white", "green", "yellow", "orange", "red", "purple"))(255))
+
+```
+
+Turning the projection cost of the coaltion into a cost raster by inverting it.
+```{r}
+projection_cost <- (log(coalition_a)*-1) + 20
+
+plot(projection_cost)
+
+```
+
+
+Now that we have the Coalition's ability to project power, let's look at ISIS, the second mover.
+
+```{r}
+
+cropped_Sunni <- crop(sunni, roads)
+cropped_sunni <- resample(cropped_Sunni, roads)
+
+cost_raster <- (cropped*roads)*(cropped_sunni)*projection_cost
+
+plot(cost_raster)
+
+```
+
+### ISIS's cost path
+
+Center's of power for ISIS:
+
+Raqqa, Mayadin, Qa'im
+
+```{r}
+x_coords <- c(38.9981, 40.4465, 41.1603, 42.3742, 40.7311)
+y_coords <- c(35.9594, 35.0161, 34.3169, 34.1252, 36.0558)
+
+
+ISIS_centers_of_power <- SpatialPoints(coords = cbind(x_coords,y_coords))
+```
+
+
+```{r}
+tr <- transition(cost_raster, function(x) 1/mean(x), 16) 
+tr <- geoCorrection(tr)
+
+a <- accCost(tr, ISIS_centers_of_power)
+
+plot(a, col=colorRampPalette(c("black", "white", "green", "yellow", "orange", "red", "purple"))(255))
+plot(log(a), col=colorRampPalette(c("blue","green", "yellow",  "red"))(255))
+
+# la <- log(a)
+
+```
+
+
+
